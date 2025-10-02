@@ -578,15 +578,22 @@ def extract():
             
             if df.empty:
                 logger.warning("No data extracted")
-                return generate_demo_extraction(lat, lon, data_type, variables, data)
+                return generate_demo_extraction(lat, lon, data_type, variables, data, grid_points_info)
+            
+            logger.info(f"Data extraction successful: {len(df)} records extracted")
             
             # 使用格子点情報を取得
             try:
+                logger.info(f"Getting grid points info for lat={lat}, lon={lon}, method={method}, kwargs={method_kwargs}")
                 grid_points_info = extractor.get_extraction_grid_points(
                     lat=lat, lon=lon, method=method, **method_kwargs
                 )
+                logger.info(f"Retrieved {len(grid_points_info)} grid points info")
+                if grid_points_info:
+                    logger.info(f"Sample grid point: {grid_points_info[0]}")
             except Exception as e:
                 logger.warning(f"Failed to get grid points info: {e}")
+                logger.exception("Full exception details:")
                 grid_points_info = []
             
             # 出力形式に応じてレスポンス
@@ -623,7 +630,8 @@ def extract():
                 
         except Exception as e:
             logger.error(f"Error during data extraction: {e}")
-            return generate_demo_extraction(lat, lon, data_type, variables, data)
+            # エラー時でも格子点情報は保持する
+            return generate_demo_extraction(lat, lon, data_type, variables, data, grid_points_info)
         
     except Exception as e:
         logger.error(f"Data extraction error: {e}")
@@ -632,7 +640,7 @@ def extract():
             'message': f'データ抽出エラー: {str(e)}'
         })
 
-def generate_demo_extraction(lat, lon, data_type, variables, request_data):
+def generate_demo_extraction(lat, lon, data_type, variables, request_data, grid_points_info=None):
     """統合デモデータ生成"""
     import pandas as pd
     from datetime import datetime, timedelta, timezone
@@ -790,10 +798,22 @@ def generate_demo_extraction(lat, lon, data_type, variables, request_data):
             headers={'Content-Disposition': 'attachment; filename=weather_data_demo.csv'}
         )
     else:
+        # JSON形式のレスポンス
         result = {
             'status': 'success',
-            'columns': df.columns.tolist(),
-            'data': df.to_dict('records')
+            'data': df.to_dict('records'),
+            'columns': list(df.columns),
+            'metadata': {
+                'lat': lat,
+                'lon': lon,
+                'data_type': data_type,
+                'variables': variables,
+                'method': request_data.get('method', 'nearest'),
+                'extraction_time': df['time'].tolist() if 'time' in df.columns else [],
+                'used_grid_points': grid_points_info if grid_points_info else [],
+                'is_demo_data': True  # デモデータであることを示すフラグ
+            },
+            'total_records': len(df)
         }
         return jsonify(result)
     """データ抽出API"""

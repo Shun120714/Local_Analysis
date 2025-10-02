@@ -8,6 +8,7 @@ import sys
 import logging
 import argparse
 import warnings
+import math
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Tuple, Optional, Union, Any
@@ -308,6 +309,8 @@ class GridPointSelector:
         self.kdtree = cKDTree(coords)
         self.lat_2d = lat_2d
         self.lon_2d = lon_2d
+        self.lat_flat = lat_2d.ravel()  # フラット化された緯度配列
+        self.lon_flat = lon_2d.ravel()  # フラット化された経度配列
         self.shape = lat_2d.shape  # (521, 633)
         
         # 基準点の格子座標（MSMの仕様）
@@ -356,9 +359,13 @@ class GridPointSelector:
         Returns:
             格子点情報のリスト
         """
+        logger.info(f"Getting used grid points info: method={method}, kwargs={kwargs}")
+        
         y_indices, x_indices, n_points = self.find_nearest_points(
             target_lat, target_lon, method, **kwargs
         )
+        
+        logger.info(f"Found {n_points} grid points: y_indices={y_indices[:5] if len(y_indices) > 5 else y_indices}, x_indices={x_indices[:5] if len(x_indices) > 5 else x_indices}")
         
         grid_points = []
         
@@ -374,40 +381,23 @@ class GridPointSelector:
                 # 距離を計算
                 grid_lat = float(lat_data[y_idx, x_idx])
                 grid_lon = float(lon_data[y_idx, x_idx])
-                distance = self._calculate_distance(target_lat, target_lon, grid_lat, grid_lon)
+                distance = self._haversine_distance(target_lat, target_lon, grid_lat, grid_lon)
                 
-                grid_points.append({
+                grid_point = {
                     'lat': grid_lat,
                     'lon': grid_lon,
                     'grid_i': int(y_idx),  # Y軸インデックス（北から）
                     'grid_j': int(x_idx),  # X軸インデックス（西から）
                     'distance': distance,
                     'method': method
-                })
+                }
+                grid_points.append(grid_point)
+                
+                if i < 3:  # 最初の3点をログ出力
+                    logger.info(f"Grid point {i}: {grid_point}")
         
+        logger.info(f"Returning {len(grid_points)} grid points info")
         return grid_points
-    
-    def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """2点間の距離を計算（km）"""
-        import math
-        
-        # 地球の半径 (km)
-        R = 6371.0
-        
-        # ラジアンに変換
-        lat1_rad = math.radians(lat1)
-        lon1_rad = math.radians(lon1)
-        lat2_rad = math.radians(lat2)
-        lon2_rad = math.radians(lon2)
-        
-        # ハヴァーサイン公式
-        dlat = lat2_rad - lat1_rad
-        dlon = lon2_rad - lon1_rad
-        
-        a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
-        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
-        
-        return R * c
     
     def _find_nearest_multiple(self, target_lat: float, target_lon: float, **kwargs) -> Tuple[np.ndarray, np.ndarray, int]:
         """複数点を検索 - 地理座標版"""
@@ -434,42 +424,46 @@ class GridPointSelector:
         
         return np.array([y_idx]), np.array([x_idx]), 1
     
-    def _find_within_radius(self, target_x: float, target_y: float, 
+    def _find_within_radius(self, target_lat: float, target_lon: float, 
                           radius_km: float) -> Tuple[np.ndarray, np.ndarray, int]:
-        """半径内の全ての点を検索"""
-        # KDTreeは [lat, lon] 座標で構築されているため、target_x=lat, target_y=lon
-        target_lat = target_x
-        target_lon = target_y
+        """半径内の全ての点を検索 - 正確な地理距離計算版"""
         
-        # 度単位での近似的な距離計算のため、kmを度に変換
-        # 緯度1度 ≈ 111.32 km
-        # 経度1度 ≈ 111.32 * cos(緯度) km
-        lat_deg_km = 111.32
-        lon_deg_km = 111.32 * np.cos(np.radians(target_lat))
+        # 全格子点との距離を計算（ハヴァーサイン公式使用）
+        all_distances = []
+        valid_indices = []
         
-        # 半径をkmから度に変換（楕円形を円形で近似）
-        # より保守的な変換として、小さい方の値を使用
-        min_deg_km = min(lat_deg_km, lon_deg_km)
-        radius_deg = radius_km / min_deg_km
+        for i in range(self.lat_flat.shape[0]):
+            grid_lat = self.lat_flat[i]
+            grid_lon = self.lon_flat[i]
+            
+            # NaNをスキップ
+            if np.isnan(grid_lat) or np.isnan(grid_lon):
+                continue
+                
+            # ハヴァーサイン公式で距離計算
+            distance = self._haversine_distance(target_lat, target_lon, grid_lat, grid_lon)
+            
+            if distance <= radius_km:
+                all_distances.append(distance)
+                valid_indices.append(i)
         
-        # 半径内の点を検索（度単位）
-        indices = self.kdtree.query_ball_point([target_lat, target_lon], radius_deg)
-        
-        if not indices:
+        if not valid_indices:
             logger.warning(f"半径 {radius_km} km 内に格子点が見つかりません")
             return np.array([]), np.array([]), 0
         
         # インデックスを2D座標に変換
-        y_indices, x_indices = np.unravel_index(indices, self.shape)
+        y_indices, x_indices = np.unravel_index(valid_indices, self.shape)
         
-        logger.info(f"半径 {radius_km} km 内の点数: {len(indices)}")
+        logger.info(f"半径 {radius_km} km 内の点数: {len(valid_indices)}")
+        logger.info(f"平均距離: {np.mean(all_distances):.2f} km")
+        logger.info(f"最大距離: {np.max(all_distances):.2f} km")
         
-        return y_indices, x_indices, len(indices)
+        return y_indices, x_indices, len(valid_indices)
     
-    def _find_k_neighbors(self, target_x: float, target_y: float, 
+    def _find_k_neighbors(self, target_lat: float, target_lon: float, 
                         k: int) -> Tuple[np.ndarray, np.ndarray, int]:
         """k近傍点を検索"""
-        distances, indices = self.kdtree.query([target_x, target_y], k=k)
+        distances, indices = self.kdtree.query([target_lat, target_lon], k=k)
         
         # スカラーの場合は配列に変換
         if np.isscalar(indices):
@@ -479,9 +473,140 @@ class GridPointSelector:
         # インデックスを2D座標に変換
         y_indices, x_indices = np.unravel_index(indices, self.shape)
         
-        logger.info(f"{k}近傍点を選択, 最大距離: {max(distances):.1f} m")
+        # 実際の距離を計算してログ出力
+        real_distances = []
+        for i in range(len(indices)):
+            grid_lat = self.lat_flat[indices[i]]
+            grid_lon = self.lon_flat[indices[i]]
+            real_dist = self._haversine_distance(target_lat, target_lon, grid_lat, grid_lon)
+            real_distances.append(real_dist)
+        
+        logger.info(f"k={k} 近傍点を選択")
+        logger.info(f"平均距離: {np.mean(real_distances):.2f} km")
+        logger.info(f"最大距離: {np.max(real_distances):.2f} km")
         
         return y_indices, x_indices, len(indices)
+    
+    def _haversine_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """ハヴァーサイン公式による2点間の距離計算（km）"""
+        R = 6371.0  # 地球半径 (km)
+        
+        # ラジアンに変換
+        lat1_rad = math.radians(lat1)
+        lon1_rad = math.radians(lon1)
+        lat2_rad = math.radians(lat2)
+        lon2_rad = math.radians(lon2)
+        
+        # ハヴァーサイン公式
+        dlat = lat2_rad - lat1_rad
+        dlon = lon2_rad - lon1_rad
+        
+        a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+        
+        return R * c
+
+
+class WeightedAverager:
+    """距離による重み付け平均を計算するクラス"""
+    
+    @staticmethod
+    def calculate_weights(target_lat: float, target_lon: float, 
+                         grid_lats: np.ndarray, grid_lons: np.ndarray,
+                         method: str = 'inverse_distance') -> np.ndarray:
+        """
+        距離による重み付けを計算
+        
+        Args:
+            target_lat: 目標緯度
+            target_lon: 目標経度  
+            grid_lats: 格子点緯度配列
+            grid_lons: 格子点経度配列
+            method: 重み付け方法
+            
+        Returns:
+            重み配列（正規化済み）
+        """
+        if method == 'inverse_distance':
+            return WeightedAverager._inverse_distance_weights(
+                target_lat, target_lon, grid_lats, grid_lons
+            )
+        elif method == 'gaussian':
+            return WeightedAverager._gaussian_weights(
+                target_lat, target_lon, grid_lats, grid_lons
+            )
+        else:
+            # 等重み（従来の算術平均）
+            return np.ones(len(grid_lats)) / len(grid_lats)
+    
+    @staticmethod
+    def _inverse_distance_weights(target_lat: float, target_lon: float,
+                                grid_lats: np.ndarray, grid_lons: np.ndarray) -> np.ndarray:
+        """逆距離重み付け"""
+        R = 6371.0  # 地球半径 (km)
+        
+        distances = []
+        for i in range(len(grid_lats)):
+            # ハヴァーサイン公式
+            lat1_rad = math.radians(target_lat)
+            lon1_rad = math.radians(target_lon)
+            lat2_rad = math.radians(grid_lats[i])
+            lon2_rad = math.radians(grid_lons[i])
+            
+            dlat = lat2_rad - lat1_rad
+            dlon = lon2_rad - lon1_rad
+            
+            a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance = R * c
+            distances.append(distance)
+        
+        distances = np.array(distances)
+        
+        # 距離が0に近い場合の処理
+        min_distance = 0.1  # 100m
+        distances = np.maximum(distances, min_distance)
+        
+        # 逆距離重み
+        weights = 1.0 / distances
+        
+        # 正規化
+        weights = weights / np.sum(weights)
+        
+        return weights
+    
+    @staticmethod
+    def _gaussian_weights(target_lat: float, target_lon: float,
+                        grid_lats: np.ndarray, grid_lons: np.ndarray,
+                        sigma_km: float = 10.0) -> np.ndarray:
+        """ガウシアン重み付け"""
+        R = 6371.0  # 地球半径 (km)
+        
+        distances = []
+        for i in range(len(grid_lats)):
+            # ハヴァーサイン公式
+            lat1_rad = math.radians(target_lat)
+            lon1_rad = math.radians(target_lon)
+            lat2_rad = math.radians(grid_lats[i])
+            lon2_rad = math.radians(grid_lons[i])
+            
+            dlat = lat2_rad - lat1_rad
+            dlon = lon2_rad - lon1_rad
+            
+            a = math.sin(dlat/2)**2 + math.cos(lat1_rad) * math.cos(lat2_rad) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            distance = R * c
+            distances.append(distance)
+        
+        distances = np.array(distances)
+        
+        # ガウシアン重み
+        weights = np.exp(-(distances**2) / (2 * sigma_km**2))
+        
+        # 正規化
+        weights = weights / np.sum(weights)
+        
+        return weights
 
 
 class DataExtractor:
@@ -713,7 +838,71 @@ class DataExtractor:
             if method == 'nearest':
                 extracted = data.isel(y=y_indices[0], x=x_indices[0])
             else:
-                extracted = data.isel(y=xr.DataArray(y_indices), x=xr.DataArray(x_indices)).mean()
+                # 重み付き平均を計算
+                selected_data = data.isel(y=xr.DataArray(y_indices), x=xr.DataArray(x_indices))
+                
+                # 格子点の緯度・経度を取得
+                if hasattr(self.ds, 'latitude') and hasattr(self.ds, 'longitude'):
+                    grid_lats = self.ds.latitude.values[y_indices, x_indices]
+                    grid_lons = self.ds.longitude.values[y_indices, x_indices]
+                else:
+                    grid_lats = self.ds.lat.values[y_indices, x_indices] 
+                    grid_lons = self.ds.lon.values[y_indices, x_indices]
+                
+                # 重みを計算
+                weights = WeightedAverager.calculate_weights(
+                    lat, lon, grid_lats, grid_lons, method='inverse_distance'
+                )
+                
+                # 重み付き平均を計算
+                if 'time' in selected_data.dims:
+                    # 時系列データの場合
+                    weighted_values = []
+                    for t in range(selected_data.sizes['time']):
+                        time_data = selected_data.isel(time=t).values
+                        if np.any(np.isnan(time_data)):
+                            # NaNがある場合は有効な値のみで重みを再正規化
+                            valid_mask = ~np.isnan(time_data)
+                            if np.any(valid_mask):
+                                valid_weights = weights[valid_mask]
+                                valid_weights = valid_weights / np.sum(valid_weights)
+                                weighted_val = np.sum(time_data[valid_mask] * valid_weights)
+                            else:
+                                weighted_val = np.nan
+                        else:
+                            weighted_val = np.sum(time_data * weights)
+                        weighted_values.append(weighted_val)
+                    
+                    # 新しいDataArrayを作成
+                    extracted = xr.DataArray(
+                        weighted_values,
+                        dims=['time'],
+                        coords={'time': selected_data.time},
+                        attrs=selected_data.attrs
+                    )
+                    
+                    # 時刻座標にタイムゾーン情報があることを確認
+                    if hasattr(extracted.time, 'values'):
+                        logger.info(f"重み付き平均後の時刻範囲: {extracted.time.values[0]} ～ {extracted.time.values[-1]}")
+                else:
+                    # 単一時刻データの場合
+                    data_values = selected_data.values
+                    if np.any(np.isnan(data_values)):
+                        # NaNがある場合は有効な値のみで重みを再正規化
+                        valid_mask = ~np.isnan(data_values)
+                        if np.any(valid_mask):
+                            valid_weights = weights[valid_mask]
+                            valid_weights = valid_weights / np.sum(valid_weights)
+                            weighted_val = np.sum(data_values[valid_mask] * valid_weights)
+                        else:
+                            weighted_val = np.nan
+                    else:
+                        weighted_val = np.sum(data_values * weights)
+                    
+                    extracted = xr.DataArray(
+                        weighted_val,
+                        attrs=selected_data.attrs
+                    )
             
             # 単位変換
             converted_data = self._convert_units(extracted, var_name, 'surface')
@@ -725,20 +914,31 @@ class DataExtractor:
                     time_size = converted_data.sizes['time']
                     for t in range(time_size):
                         if t >= len(results):
-                            # UTC時刻をJSTに変換
-                            utc_time = pd.to_datetime(converted_data.time.isel(time=t).values)
-                            if utc_time.tz is None:
-                                # タイムゾーン情報がない場合はUTCとして扱う
-                                utc_time = utc_time.tz_localize('UTC')
-                            jst_time = utc_time.tz_convert('Asia/Tokyo')
-                            
-                            results.append({
-                                'time': jst_time,
-                                'lat': lat,
-                                'lon': lon,
-                                'method': method,
-                                'n_points': n_points
-                            })
+                            # UTC時刻をJSTに変換（安全な変換）
+                            try:
+                                time_value = converted_data.time.isel(time=t).values
+                                
+                                # NaT（Not a Time）をチェック
+                                if pd.isna(time_value):
+                                    logger.warning(f"時刻データがNaT（Not a Time）です: index {t}")
+                                    continue
+                                    
+                                utc_time = pd.to_datetime(time_value)
+                                if utc_time.tz is None:
+                                    # タイムゾーン情報がない場合はUTCとして扱う
+                                    utc_time = utc_time.tz_localize('UTC')
+                                jst_time = utc_time.tz_convert('Asia/Tokyo')
+                                
+                                results.append({
+                                    'time': jst_time,
+                                    'lat': lat,
+                                    'lon': lon,
+                                    'method': method,
+                                    'n_points': n_points
+                                })
+                            except Exception as e:
+                                logger.error(f"時刻変換エラー (index {t}): {e}")
+                                continue
                         
                         # 変数名に対応するカラム名を設定
                         col_name = self._get_output_column_name(var_name, 'surface')
@@ -870,7 +1070,71 @@ class DataExtractor:
                 if method == 'nearest':
                     extracted = data.isel(y=y_indices[0], x=x_indices[0])
                 else:
-                    extracted = data.isel(y=xr.DataArray(y_indices), x=xr.DataArray(x_indices)).mean()
+                    # 重み付き平均を計算
+                    selected_data = data.isel(y=xr.DataArray(y_indices), x=xr.DataArray(x_indices))
+                    
+                    # 格子点の緯度・経度を取得
+                    if hasattr(self.ds, 'latitude') and hasattr(self.ds, 'longitude'):
+                        grid_lats = self.ds.latitude.values[y_indices, x_indices]
+                        grid_lons = self.ds.longitude.values[y_indices, x_indices]
+                    else:
+                        grid_lats = self.ds.lat.values[y_indices, x_indices] 
+                        grid_lons = self.ds.lon.values[y_indices, x_indices]
+                    
+                    # 重みを計算
+                    weights = WeightedAverager.calculate_weights(
+                        lat, lon, grid_lats, grid_lons, method='inverse_distance'
+                    )
+                    
+                    # 重み付き平均を計算
+                    if 'time' in selected_data.dims:
+                        # 時系列データの場合
+                        weighted_values = []
+                        for t in range(selected_data.sizes['time']):
+                            time_data = selected_data.isel(time=t).values
+                            if np.any(np.isnan(time_data)):
+                                # NaNがある場合は有効な値のみで重みを再正規化
+                                valid_mask = ~np.isnan(time_data)
+                                if np.any(valid_mask):
+                                    valid_weights = weights[valid_mask]
+                                    valid_weights = valid_weights / np.sum(valid_weights)
+                                    weighted_val = np.sum(time_data[valid_mask] * valid_weights)
+                                else:
+                                    weighted_val = np.nan
+                            else:
+                                weighted_val = np.sum(time_data * weights)
+                            weighted_values.append(weighted_val)
+                        
+                        # 新しいDataArrayを作成
+                        extracted = xr.DataArray(
+                            weighted_values,
+                            dims=['time'],
+                            coords={'time': selected_data.time},
+                            attrs=selected_data.attrs
+                        )
+                        
+                        # 時刻座標にタイムゾーン情報があることを確認
+                        if hasattr(extracted.time, 'values'):
+                            logger.info(f"等圧面重み付き平均後の時刻範囲: {extracted.time.values[0]} ～ {extracted.time.values[-1]}")
+                    else:
+                        # 単一時刻データの場合
+                        data_values = selected_data.values
+                        if np.any(np.isnan(data_values)):
+                            # NaNがある場合は有効な値のみで重みを再正規化
+                            valid_mask = ~np.isnan(data_values)
+                            if np.any(valid_mask):
+                                valid_weights = weights[valid_mask]
+                                valid_weights = valid_weights / np.sum(valid_weights)
+                                weighted_val = np.sum(data_values[valid_mask] * valid_weights)
+                            else:
+                                weighted_val = np.nan
+                        else:
+                            weighted_val = np.sum(data_values * weights)
+                        
+                        extracted = xr.DataArray(
+                            weighted_val,
+                            attrs=selected_data.attrs
+                        )
                 
                 # 単位変換
                 converted_data = self._convert_units(extracted, var_name, 'isobaric')
@@ -883,29 +1147,42 @@ class DataExtractor:
                         for t in range(time_size):
                             # 該当する結果行を検索
                             result_idx = None
-                            # UTC時刻をJSTに変換
-                            utc_time = pd.to_datetime(converted_data.time.isel(time=t).values)
-                            if utc_time.tz is None:
-                                # タイムゾーン情報がない場合はUTCとして扱う
-                                utc_time = utc_time.tz_localize('UTC')
-                            jst_time = utc_time.tz_convert('Asia/Tokyo')
                             
-                            for i, result in enumerate(results):
-                                if (result['time'] == jst_time and 
-                                    result['level_hPa'] == level):
-                                    result_idx = i
-                                    break
-                            
-                            if result_idx is None:
-                                results.append({
-                                    'time': jst_time,
-                                    'lat': lat,
-                                    'lon': lon,
-                                    'level_hPa': level,
-                                    'method': method,
-                                    'n_points': n_points
-                                })
-                                result_idx = len(results) - 1
+                            # UTC時刻をJSTに変換（安全な変換）
+                            try:
+                                time_value = converted_data.time.isel(time=t).values
+                                
+                                # NaT（Not a Time）をチェック
+                                if pd.isna(time_value):
+                                    logger.warning(f"等圧面時刻データがNaT（Not a Time）です: index {t}, level {level}")
+                                    continue
+                                    
+                                utc_time = pd.to_datetime(time_value)
+                                if utc_time.tz is None:
+                                    # タイムゾーン情報がない場合はUTCとして扱う
+                                    utc_time = utc_time.tz_localize('UTC')
+                                jst_time = utc_time.tz_convert('Asia/Tokyo')
+                                
+                                for i, result in enumerate(results):
+                                    if (result['time'] == jst_time and 
+                                        result['level_hPa'] == level):
+                                        result_idx = i
+                                        break
+                                
+                                if result_idx is None:
+                                    results.append({
+                                        'time': jst_time,
+                                        'lat': lat,
+                                        'lon': lon,
+                                        'level_hPa': level,
+                                        'method': method,
+                                        'n_points': n_points
+                                    })
+                                    result_idx = len(results) - 1
+                                    
+                            except Exception as e:
+                                logger.error(f"等圧面時刻変換エラー (index {t}, level {level}): {e}")
+                                continue
                             
                             col_name = self._get_output_column_name(var_name, 'isobaric')
                             results[result_idx][col_name] = float(converted_data.isel(time=t).values)
