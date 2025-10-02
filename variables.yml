@@ -1,0 +1,91 @@
+# 変数名マッピング設定ファイル
+# データセット内の変数名を論理名にマップ
+
+surface:
+  air_temperature: "TMP_1D5maboveground"  # 1.5m気温
+  relative_humidity: "RH_1D5maboveground"  # 1.5m相対湿度
+  u_wind: "UGRD_10maboveground"            # 10m風u成分
+  v_wind: "VGRD_10maboveground"            # 10m風v成分
+  surface_pressure: "PRMSL_meansealevel"   # 海面更正気圧
+  # 計算変数（U/V成分から導出）
+  wind_speed: "_calculated"                # 風速（計算値）
+  wind_direction: "_calculated"            # 風向（計算値）
+
+isobaric:
+  air_temperature: "TMP_{level}mb"          # 等圧面気温
+  relative_humidity: "RH_{level}mb"         # 等圧面相対湿度
+  u_wind: "UGRD_{level}mb"                  # 等圧面風u成分
+  v_wind: "VGRD_{level}mb"                  # 等圧面風v成分
+  geopotential_height: "HGT_{level}mb"     # ジオポテンシャル高度
+  pressure: "{level}"                       # 気圧面
+  # 計算変数（U/V成分から導出）
+  wind_speed: "_calculated"                # 風速（計算値）
+  wind_direction: "_calculated"            # 風向（計算値）
+
+# 変数の日本語名と単位
+variable_info:
+  surface:
+    air_temperature:
+      name: "地上気温"
+      unit: "°C"
+    relative_humidity:
+      name: "地上相対湿度"
+      unit: "%"
+    u_wind:
+      name: "地上風u成分"
+      unit: "m/s"
+    v_wind:
+      name: "地上風v成分"
+      unit: "m/s"
+    surface_pressure:
+      name: "海面更正気圧"
+      unit: "hPa"
+    wind_speed:
+      name: "地上風速"
+      unit: "m/s"
+    wind_direction:
+      name: "地上風向"
+      unit: "度"
+  
+  isobaric:
+    air_temperature:
+      name: "等圧面気温"
+      unit: "°C"
+    relative_humidity:
+      name: "等圧面相対湿度"
+      unit: "%"
+    u_wind:
+      name: "等圧面風u成分"
+      unit: "m/s"
+    v_wind:
+      name: "等圧面風v成分"
+      unit: "m/s"
+    geopotential_height:
+      name: "ジオポテンシャル高度"
+      unit: "m"
+    pressure:
+      name: "気圧"
+      unit: "hPa"
+    wind_speed:
+      name: "等圧面風速"
+      unit: "m/s"
+    wind_direction:
+      name: "等圧面風向"
+      unit: "度"
+
+# 変数の候補名（自動探索用）
+fallback_patterns:
+  surface:
+    air_temperature: ["t2m", "tmp", "temperature", "temp", "TMP_*surface*", "TMP_*ground*"]
+    relative_humidity: ["rh", "humidity", "RH_*surface*", "RH_*ground*"]
+    u_wind: ["u", "u10", "ugrd", "uwind", "UGRD_*surface*", "UGRD_*ground*"]
+    v_wind: ["v", "v10", "vgrd", "vwind", "VGRD_*surface*", "VGRD_*ground*"]
+    surface_pressure: ["sp", "prmsl", "pressure", "slp", "PRMSL*", "PS*"]
+    
+  isobaric:
+    air_temperature: ["t", "tmp", "temperature", "temp", "TMP_*mb", "T_*hPa"]
+    relative_humidity: ["rh", "humidity", "RH_*mb", "RH_*hPa"]
+    u_wind: ["u", "ugrd", "uwind", "UGRD_*mb", "U_*hPa"]
+    v_wind: ["v", "vgrd", "vwind", "VGRD_*mb", "V_*hPa"]
+    geopotential_height: ["z", "hgt", "height", "geopotential", "HGT_*mb", "Z_*hPa"]
+    pressure: ["pres", "pressure", "level", "plev"]

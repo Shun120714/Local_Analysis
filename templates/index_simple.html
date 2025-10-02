@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>気象データ抽出ツール</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Leaflet CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.7.1/dist/leaflet.css" />
+    
+    <style>
+        #map {
+            height: 500px;
+            width: 100%;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .coordinate-display {
+            background-color: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        
+        .loading {
+            display: none;
+        }
+        
+        .results-table {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+        
+        .level-checkbox {
+            display: inline-block;
+            margin-right: 15px;
+            margin-bottom: 5px;
+        }
+        
+        .extraction-status {
+            margin-top: 15px;
+        }
+        
+        .chart-container {
+            height: 300px;
+            margin-bottom: 20px;
+        }
+        
+        .chart-title {
+            text-align: center;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
+        <div class="container">
+            <a class="navbar-brand" href="#">気象データ抽出ツール</a>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <div class="row">
+            <!-- マップ部分 -->
+            <div class="col-lg-8">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">地点選択</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="map"></div>
+                        <div class="coordinate-display">
+                            <strong>選択地点:</strong>
+                            <div id="coordinates">地図をクリックして地点を選択してください</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 設定パネル -->
+            <div class="col-lg-4">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">抽出設定</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- 格子点表示コントロール -->
+                        <div class="mb-3">
+                            <label class="form-label">地図表示オプション</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="showGridPoints">
+                                <label class="form-check-label" for="showGridPoints">
+                                    全格子点を表示 (633×521)
+                                </label>
+                            </div>
+                            <div class="mt-2" id="gridDensityOptions" style="display: none;">
+                                <label class="form-label small" for="gridDensity">表示密度</label>
+                                <select class="form-select form-select-sm" id="gridDensity" name="gridDensity">
+                                    <option value="auto">自動（ズーム連動）</option>
+                                    <option value="1">最高密度（5km間隔）</option>
+                                    <option value="2">高密度（10km間隔）</option>
+                                    <option value="4">中密度（20km間隔）</option>
+                                    <option value="8">低密度（40km間隔）</option>
+                                </select>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="showNearbyGridPoints">
+                                <label class="form-check-label" for="showNearbyGridPoints">選択点付近の格子点のみ表示</label>
+                            </div>
+                            <div class="mt-2" id="nearbyGridOptions" style="display: none;">
+                                <div class="row">
+                                    <div class="col-6">
+                                        <label class="form-label small">半径 (km)</label>
+                                        <input type="number" class="form-control form-control-sm" id="nearbyRadius" value="50" min="10" max="200" step="10">
+                                    </div>
+                                    <div class="col-6">
+                                        <label class="form-label small">最大表示点数</label>
+                                        <input type="number" class="form-control form-control-sm" id="nearbyMaxPoints" value="50" min="10" max="200" step="10">
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- データタイプ選択 -->
+                        <div class="mb-3">
+                            <label class="form-label">データタイプ</label>
+                            <div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="dataType" value="surface" id="surfaceData" checked>
+                                    <label class="form-check-label" for="surfaceData">地上データ</label>
+                                </div>
+                                <div class="form-check form-check-inline">
+                                    <input class="form-check-input" type="radio" name="dataType" value="isobaric" id="isobaricData">
+                                    <label class="form-check-label" for="isobaricData">気圧面データ</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 気圧面レベル選択 -->
+                        <div class="mb-3" id="levelSelection" style="display: none;">
+                            <label class="form-label">気圧面レベル (hPa)</label>
+                            <div id="levelCheckboxes" class="border p-2" style="max-height: 200px; overflow-y: auto;">
+                                <!-- 動的に生成される -->
+                            </div>
+                        </div>
+                        
+                        <!-- 変数選択 -->
+                        <div class="mb-3">
+                            <label class="form-label">取得変数</label>
+                            <div id="variableSelection" style="max-height: 200px; overflow-y: auto;">
+                                <!-- 動的に生成される -->
+                            </div>
+                        </div>
+                        
+                        <!-- 抽出方法 -->
+                        <div class="mb-3">
+                            <label class="form-label">抽出方法</label>
+                            <select class="form-select" id="method">
+                                <option value="nearest">最近傍点</option>
+                                <option value="mean">平均化</option>
+                            </select>
+                        </div>
+                        
+                        <!-- 平均化オプション -->
+                        <div class="mb-3" id="meanOptions" style="display: none;">
+                            <label class="form-label">平均化範囲</label>
+                            <div class="row">
+                                <div class="col-6">
+                                    <label class="form-label small">半径 (km)</label>
+                                    <input type="number" class="form-control form-control-sm" id="radiusKm" value="10" min="1" max="100">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">または近傍点数</label>
+                                    <input type="number" class="form-control form-control-sm" id="kNeighbors" min="1" max="50">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 時間モード -->
+                        <div class="mb-3">
+                            <label class="form-label">時間選択</label>
+                            <div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="timeMode" value="single" id="singleTime" checked>
+                                    <label class="form-check-label" for="singleTime">単一時刻</label>
+                                </div>
+                                <div class="form-check">
+                                    <input class="form-check-input" type="radio" name="timeMode" value="range" id="rangeTime">
+                                    <label class="form-check-label" for="rangeTime">時間範囲</label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 時間入力 -->
+                        <div class="mb-3" id="singleTimeInput">
+                            <label class="form-label">時刻 (JST)</label>
+                            <input type="datetime-local" class="form-control" id="timeSingle" value="2024-07-03T12:00">
+                        </div>
+                        
+                        <div class="mb-3" id="rangeTimeInput" style="display: none;">
+                            <div class="row">
+                                <div class="col-6">
+                                    <label class="form-label">開始時刻 (JST)</label>
+                                    <input type="datetime-local" class="form-control" id="timeStart" value="2024-07-03T00:00">
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label">終了時刻 (JST)</label>
+                                    <input type="datetime-local" class="form-control" id="timeEnd" value="2024-07-03T23:00">
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- 出力形式 -->
+                        <div class="mb-3">
+                            <label class="form-label">出力形式</label>
+                            <select class="form-select" id="outputFormat">
+                                <option value="json">JSON（画面表示）</option>
+                                <option value="csv">CSVダウンロード</option>
+                            </select>
+                        </div>
+                        
+                        <!-- 抽出ボタン -->
+                        <button type="button" class="btn btn-primary w-100" id="extractBtn">データ抽出</button>
+                        
+                        <!-- ローディング表示 -->
+                        <div class="loading text-center mt-3" id="loading">
+                            <div class="spinner-border text-primary" role="status">
+                                <span class="visually-hidden">抽出中...</span>
+                            </div>
+                            <div>データを抽出しています...</div>
+                        </div>
+                        
+                        <!-- ステータス表示 -->
+                        <div id="status" class="extraction-status" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 結果表示 -->
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0">抽出結果</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="results">
+                            抽出を実行すると、ここに結果が表示されます。
+                        </div>
+                        <!-- グラフ表示エリア -->
+                        <div id="charts-container" style="display: none;">
+                            <hr>
+                            <h6>時系列グラフ</h6>
+                            <div id="charts" class="row"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.7.1/dist/leaflet.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <script>
+        // グローバル変数
+        let map;
+        let marker;
+        let selectedLat = null;
+        let selectedLon = null;
+        let gridPointsLayer = null;
+        let usedGridPointsLayer = null;
+        
+        // マップ初期化
+        function initMap() {
+            // 日本中心の初期表示
+            map = L.map('map').setView([35.0, 139.0], 6);
+            
+            // OpenStreetMapタイル
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            
+            // 格子点表示チェックボックスのイベントリスナー
+            document.getElementById('showGridPoints').addEventListener('change', function(e) {
+                if (e.target.checked) {
+                    showGridPoints();
+                } else {
+                    hideGridPoints();
+                }
+            });
+            
+            // 付近格子点表示チェックボックスのイベントリスナー
+            document.getElementById('showNearbyGridPoints').addEventListener('change', function(e) {
+                const optionsDiv = document.getElementById('nearbyGridOptions');
+                if (e.target.checked) {
+                    optionsDiv.style.display = 'block';
+                    // 全体表示をオフにする
+                    document.getElementById('showGridPoints').checked = false;
+                    hideGridPoints();
+                    // 選択点があれば付近格子点を表示
+                    if (selectedLat !== null && selectedLon !== null) {
+                        showNearbyGridPoints();
+                    }
+                } else {
+                    optionsDiv.style.display = 'none';
+                    hideGridPoints();
+                }
+            });
+            
+            // 付近格子点設定変更時のイベントリスナー
+            document.getElementById('nearbyRadius').addEventListener('change', function() {
+                if (document.getElementById('showNearbyGridPoints').checked && 
+                    selectedLat !== null && selectedLon !== null) {
+                    showNearbyGridPoints();
+                }
+            });
+            
+            document.getElementById('nearbyMaxPoints').addEventListener('change', function() {
+                if (document.getElementById('showNearbyGridPoints').checked && 
+                    selectedLat !== null && selectedLon !== null) {
+                    showNearbyGridPoints();
+                }
+            });
+            
+            // マップクリックイベント
+            map.on('click', function(e) {
+                selectedLat = e.latlng.lat;
+                selectedLon = e.latlng.lng;
+                
+                // マーカー更新
+                if (marker) {
+                    map.removeLayer(marker);
+                }
+                marker = L.marker([selectedLat, selectedLon], {
+                    icon: L.icon({
+                        iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                        iconSize: [25, 41],
+                        iconAnchor: [12, 41],
+                        popupAnchor: [1, -34],
+                        shadowSize: [41, 41]
+                    })
+                }).addTo(map);
+                
+                // 座標表示更新
+                document.getElementById('coordinates').innerHTML = 
+                    `緯度: ${selectedLat.toFixed(4)}°<br>経度: ${selectedLon.toFixed(4)}°`;
+                
+                // 付近格子点表示が有効な場合は更新
+                if (document.getElementById('showNearbyGridPoints').checked) {
+                    showNearbyGridPoints();
+                }
+            });
+        }
+        
+        // 格子点表示
+        function showGridPoints() {
+            if (gridPointsLayer) {
+                return; // 既に表示中
+            }
+            
+            // ローディング表示
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'grid-loading';
+            loadingDiv.innerHTML = '<div class="alert alert-info">格子点を読み込み中...</div>';
+            document.body.appendChild(loadingDiv);
+            
+            fetch('/api/grid_points?step=10') // 10点おきに表示
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        gridPointsLayer = L.layerGroup();
+                        
+                        data.points.forEach(point => {
+                            const circle = L.circleMarker([point.lat, point.lon], {
+                                radius: 2,
+                                color: 'blue',
+                                fillColor: 'lightblue',
+                                fillOpacity: 0.6,
+                                weight: 1
+                            }).bindPopup(`格子点<br>緯度: ${point.lat.toFixed(3)}°<br>経度: ${point.lon.toFixed(3)}°`);
+                            
+                            gridPointsLayer.addLayer(circle);
+                        });
+                        
+                        gridPointsLayer.addTo(map);
+                    } else {
+                        alert('格子点データの取得に失敗しました: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('格子点データの取得中にエラーが発生しました');
+                })
+                .finally(() => {
+                    // ローディング表示を削除
+                    const loadingDiv = document.getElementById('grid-loading');
+                    if (loadingDiv) {
+                        loadingDiv.remove();
+                    }
+                });
+        }
+        
+        // 格子点非表示
+        function hideGridPoints() {
+            if (gridPointsLayer) {
+                map.removeLayer(gridPointsLayer);
+                gridPointsLayer = null;
+            }
+            // 使用格子点レイヤーは保持（データ抽出結果として重要）
+        }
+        
+        // 付近格子点表示
+        function showNearbyGridPoints() {
+            if (!selectedLat || !selectedLon) {
+                alert('まず地図上で位置を選択してください');
+                return;
+            }
+            
+            // 既存の格子点を削除
+            hideGridPoints();
+            
+            // パラメータを取得
+            const radius = parseInt(document.getElementById('nearbyRadius').value) || 50;
+            const maxPoints = parseInt(document.getElementById('nearbyMaxPoints').value) || 50;
+            
+            // ローディング表示
+            const loadingDiv = document.createElement('div');
+            loadingDiv.id = 'grid-loading';
+            loadingDiv.innerHTML = '<div class="alert alert-info">付近の格子点を読み込み中...</div>';
+            document.body.appendChild(loadingDiv);
+            
+            // APIから付近格子点を取得
+            fetch(`/api/nearby_grid_points?lat=${selectedLat}&lon=${selectedLon}&radius=${radius}&max_points=${maxPoints}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        gridPointsLayer = L.layerGroup();
+                        
+                        data.points.forEach((point, index) => {
+                            // 距離に応じて色を変える
+                            const distance = point.distance || 0;
+                            let color = 'blue';
+                            let fillColor = 'lightblue';
+                            
+                            if (distance < radius * 0.3) {
+                                color = 'red';
+                                fillColor = 'lightcoral';
+                            } else if (distance < radius * 0.6) {
+                                color = 'orange';
+                                fillColor = 'lightyellow';
+                            }
+                            
+                            const circle = L.circleMarker([point.lat, point.lon], {
+                                radius: 4,
+                                color: color,
+                                fillColor: fillColor,
+                                fillOpacity: 0.7,
+                                weight: 1
+                            }).bindPopup(`
+                                格子点 #${index + 1}<br>
+                                緯度: ${point.lat.toFixed(4)}°<br>
+                                経度: ${point.lon.toFixed(4)}°<br>
+                                距離: ${distance.toFixed(1)} km<br>
+                                グリッド: [${point.grid_i}, ${point.grid_j}]
+                            `);
+                            
+                            gridPointsLayer.addLayer(circle);
+                        });
+                        
+                        gridPointsLayer.addTo(map);
+                        
+                        // 情報を更新
+                        const infoText = `付近格子点: ${data.points.length}点表示 (半径${radius}km内)`;
+                        const existingInfo = document.getElementById('grid-info');
+                        if (existingInfo) {
+                            existingInfo.textContent = infoText;
+                        } else {
+                            const infoDiv = document.createElement('div');
+                            infoDiv.id = 'grid-info';
+                            infoDiv.className = 'alert alert-success mt-2';
+                            infoDiv.textContent = infoText;
+                            document.getElementById('coordinates').parentNode.appendChild(infoDiv);
+                        }
+                        
+                    } else {
+                        alert('付近格子点データの取得に失敗しました: ' + data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert('付近格子点データの取得中にエラーが発生しました');
+                })
+                .finally(() => {
+                    // ローディング表示を削除
+                    const loadingDiv = document.getElementById('grid-loading');
+                    if (loadingDiv) {
+                        loadingDiv.remove();
+                    }
+                });
+        }
+        
+        // 気圧面レベル初期化
+        function initLevels() {
+            fetch('/api/available_levels')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        const container = document.getElementById('levelCheckboxes');
+                        container.innerHTML = '';
+                        
+                        data.levels.forEach(level => {
+                            const div = document.createElement('div');
+                            div.className = 'form-check level-checkbox';
+                            div.innerHTML = `
+                                <input class="form-check-input" type="checkbox" value="${level}" id="level${level}">
+                                <label class="form-check-label" for="level${level}">
+                                    ${level} hPa
+                                </label>
+                            `;
+                            container.appendChild(div);
+                        });
+                        
+                        // デフォルトで主要レベルを選択
+                        [1000, 850, 500, 300].forEach(level => {
+                            const checkbox = document.getElementById(`level${level}`);
+                            if (checkbox) checkbox.checked = true;
+                        });
+                    } else {
+                        console.error('レベル取得エラー:', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('レベル取得エラー:', error);
+                });
+        }
+        
+        // 変数選択の読み込み
+        function loadVariables() {
+            fetch('/api/available_variables')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        window.allVariables = data.variables;
+                        updateVariableSelection();
+                    } else {
+                        console.error('変数リスト取得エラー:', data.message);
+                    }
+                })
+                .catch(error => {
+                    console.error('変数リスト取得エラー:', error);
+                });
+        }
+        
+        // 変数選択UIを更新
+        function updateVariableSelection() {
+            const container = document.getElementById('variableSelection');
+            container.innerHTML = '';
+            
+            if (!window.allVariables) return;
+            
+            // 変数をカテゴリ分けして表示
+            const basicVars = window.allVariables.filter(v => ['u', 'v', 't', 'rh', 'pressure'].includes(v.name));
+            const windVars = window.allVariables.filter(v => ['wind_speed', 'wind_direction'].includes(v.name));
+            const otherVars = window.allVariables.filter(v => !['u', 'v', 't', 'rh', 'pressure', 'wind_speed', 'wind_direction'].includes(v.name));
+            
+            // 基本変数
+            if (basicVars.length > 0) {
+                const basicSection = document.createElement('div');
+                basicSection.innerHTML = '<h6 class="text-primary mb-2">🌡️ 基本変数</h6>';
+                container.appendChild(basicSection);
+                
+                basicVars.forEach(variable => {
+                    const div = document.createElement('div');
+                    div.className = 'form-check mb-2';
+                    // デフォルトでU, V成分をチェック
+                    const isChecked = ['u', 'v'].includes(variable.name) ? 'checked' : '';
+                    div.innerHTML = `
+                        <input class="form-check-input" type="checkbox" value="${variable.name}" id="var_${variable.name}" ${isChecked}>
+                        <label class="form-check-label" for="var_${variable.name}">
+                            <strong>${variable.long_name}</strong> 
+                            <small class="text-muted">(${variable.units})</small>
+                            <br><small class="text-secondary">${variable.description || ''}</small>
+                        </label>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+            
+            // 風関連変数
+            if (windVars.length > 0) {
+                const windSection = document.createElement('div');
+                windSection.className = 'mt-3';
+                windSection.innerHTML = '<h6 class="text-success mb-2">💨 風関連（計算値）</h6>';
+                container.appendChild(windSection);
+                
+                windVars.forEach(variable => {
+                    const div = document.createElement('div');
+                    div.className = 'form-check mb-2';
+                    // デフォルトで風速・風向をチェック
+                    const isChecked = 'checked';
+                    div.innerHTML = `
+                        <input class="form-check-input" type="checkbox" value="${variable.name}" id="var_${variable.name}" ${isChecked}>
+                        <label class="form-check-label" for="var_${variable.name}">
+                            <strong>${variable.long_name}</strong> 
+                            <small class="text-muted">(${variable.units})</small>
+                            <br><small class="text-secondary">${variable.description || ''}</small>
+                        </label>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+            
+            // その他の変数
+            if (otherVars.length > 0) {
+                const otherSection = document.createElement('div');
+                otherSection.className = 'mt-3';
+                otherSection.innerHTML = '<h6 class="text-secondary mb-2">📊 その他</h6>';
+                container.appendChild(otherSection);
+                
+                otherVars.forEach(variable => {
+                    const div = document.createElement('div');
+                    div.className = 'form-check mb-2';
+                    div.innerHTML = `
+                        <input class="form-check-input" type="checkbox" value="${variable.name}" id="var_${variable.name}">
+                        <label class="form-check-label" for="var_${variable.name}">
+                            <strong>${variable.long_name}</strong> 
+                            <small class="text-muted">(${variable.units})</small>
+                            <br><small class="text-secondary">${variable.description || ''}</small>
+                        </label>
+                    `;
+                    container.appendChild(div);
+                });
+            }
+        }
+        
+        // イベントリスナー設定
+        function setupEventListeners() {
+            // データタイプ変更
+            document.querySelectorAll('input[name="dataType"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    const levelSelection = document.getElementById('levelSelection');
+                    if (this.value === 'isobaric') {
+                        levelSelection.style.display = 'block';
+                    } else {
+                        levelSelection.style.display = 'none';
+                    }
+                });
+            });
+            
+            // 抽出方法変更
+            document.getElementById('method').addEventListener('change', function() {
+                const meanOptions = document.getElementById('meanOptions');
+                if (this.value === 'mean') {
+                    meanOptions.style.display = 'block';
+                } else {
+                    meanOptions.style.display = 'none';
+                }
+            });
+            
+            // 時間モード変更
+            document.querySelectorAll('input[name="timeMode"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    const singleInput = document.getElementById('singleTimeInput');
+                    const rangeInput = document.getElementById('rangeTimeInput');
+                    
+                    if (this.value === 'single') {
+                        singleInput.style.display = 'block';
+                        rangeInput.style.display = 'none';
+                    } else {
+                        singleInput.style.display = 'none';
+                        rangeInput.style.display = 'block';
+                    }
+                });
+            });
+            
+            // 出力形式変更時のイベントリスナー
+            document.getElementById('outputFormat').addEventListener('change', function() {
+                // JSON以外が選択された場合はグラフを非表示にする
+                if (this.value !== 'json') {
+                    const chartsContainer = document.getElementById('charts-container');
+                    chartsContainer.style.display = 'none';
+                    
+                    // 既存のチャートを破棄
+                    currentCharts.forEach(chart => {
+                        if (chart) chart.destroy();
+                    });
+                    currentCharts = [];
+                }
+            });
+            
+            // 抽出ボタン
+            document.getElementById('extractBtn').addEventListener('click', function() {
+                if (selectedLat === null || selectedLon === null) {
+                    alert('地図上で地点を選択してください。');
+                    return;
+                }
+                
+                extractData();
+            });
+        }
+        
+        // データ抽出実行
+        function extractData() {
+            showLoading(true);
+            showStatus('info', 'データを抽出しています...');
+            
+            // パラメータ収集
+            const dataType = document.querySelector('input[name="dataType"]:checked').value;
+            const method = document.getElementById('method').value;
+            const timeMode = document.querySelector('input[name="timeMode"]:checked').value;
+            const outputFormat = document.getElementById('outputFormat').value;
+            
+            // 選択された変数
+            const variables = Array.from(document.querySelectorAll('#variableSelection input[type="checkbox"]:checked'))
+                .map(cb => cb.value);
+            
+            if (variables.length === 0) {
+                showLoading(false);
+                showStatus('error', '少なくとも1つの変数を選択してください。');
+                return;
+            }
+            
+            // 時間パラメータ
+            let timeParams = {};
+            if (timeMode === 'single') {
+                timeParams.timeSingle = document.getElementById('timeSingle').value;
+            } else {
+                timeParams.timeStart = document.getElementById('timeStart').value;
+                timeParams.timeEnd = document.getElementById('timeEnd').value;
+            }
+            
+            // 気圧面レベル
+            let levels = [];
+            if (dataType === 'isobaric') {
+                levels = Array.from(document.querySelectorAll('#levelCheckboxes input[type="checkbox"]:checked'))
+                    .map(cb => parseInt(cb.value));
+                
+                if (levels.length === 0) {
+                    showLoading(false);
+                    showStatus('error', '少なくとも1つの気圧面レベルを選択してください。');
+                    return;
+                }
+            }
+            
+            // 平均化パラメータ
+            let meanParams = {};
+            if (method === 'mean') {
+                const radiusKm = document.getElementById('radiusKm').value;
+                const kNeighbors = document.getElementById('kNeighbors').value;
+                
+                if (radiusKm) {
+                    meanParams.radiusKm = parseFloat(radiusKm);
+                }
+                if (kNeighbors) {
+                    meanParams.kNeighbors = parseInt(kNeighbors);
+                }
+            }
+            
+            // リクエストデータ構築
+            const requestData = {
+                lat: selectedLat,
+                lon: selectedLon,
+                dataType: dataType,
+                method: method,
+                timeMode: timeMode,
+                variables: variables,
+                outputFormat: outputFormat,
+                ...timeParams,
+                ...meanParams
+            };
+            
+            if (dataType === 'isobaric') {
+                requestData.levels = levels;
+            }
+            
+            // API呼び出し
+            fetch('/api/extract', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(requestData)
+            })
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                if (outputFormat === 'csv') {
+                    // CSVダウンロード
+                    return response.blob().then(blob => {
+                        const url = window.URL.createObjectURL(blob);
+                        const a = document.createElement('a');
+                        a.style.display = 'none';
+                        a.href = url;
+                        a.download = `weather_data_${new Date().toISOString().slice(0,19).replace(/:/g, '-')}.csv`;
+                        document.body.appendChild(a);
+                        a.click();
+                        window.URL.revokeObjectURL(url);
+                        document.body.removeChild(a);
+                        
+                        showLoading(false);
+                        showStatus('success', 'CSVファイルのダウンロードが開始されました。');
+                    });
+                } else {
+                    // JSON表示
+                    return response.json();
+                }
+            })
+            .then(data => {
+                if (outputFormat === 'json' && data) {
+                    showLoading(false);
+                    showStatus('success', 'データの抽出が完了しました。');
+                    displayResults(data);
+                }
+            })
+            .catch(error => {
+                console.error('抽出エラー:', error);
+                showLoading(false);
+                showStatus('error', 'データ抽出に失敗しました: ' + error.message);
+            });
+        }
+        
+        // 結果表示
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            
+            console.log('Received data:', data); // デバッグ用
+            
+            if (data.error) {
+                resultsDiv.innerHTML = `<div class="alert alert-danger">エラー: ${data.error}</div>`;
+                return;
+            }
+            
+            // データ構造の検証
+            if (!data.data || !Array.isArray(data.data)) {
+                resultsDiv.innerHTML = `<div class="alert alert-danger">データ形式エラー: data.data が配列ではありません</div>`;
+                console.error('Invalid data structure:', data);
+                return;
+            }
+            
+            if (data.data.length === 0) {
+                resultsDiv.innerHTML = `<div class="alert alert-warning">データが見つかりませんでした</div>`;
+                return;
+            }
+            
+            // 使用格子点を地図上に表示
+            if (data.metadata && data.metadata.used_grid_points) {
+                showUsedGridPoints(data.metadata.used_grid_points);
+            }
+            
+            // カラム名を取得（サーバーから提供される場合はそれを使用、ない場合はデータから推定）
+            const columns = data.columns || Object.keys(data.data[0]);
+            
+            // カラム名を日本語に変換するマッピング
+            const columnMapping = {
+                'time': '時刻',
+                'lat': '緯度',
+                'lon': '経度',
+                'level_hPa': '気圧面 (hPa)',
+                'method': '抽出方法',
+                'n_points': '格子点数',
+                'u_ms': 'U成分 (m/s)',
+                'v_ms': 'V成分 (m/s)',
+                'ta_C': '気温 (°C)',
+                'rh_%': '相対湿度 (%)',
+                'ps_hPa': '海面更正気圧 (hPa)',
+                'pres_hPa': '気圧 (hPa)',
+                'wind_speed_ms': '風速 (m/s)',
+                'wind_direction_deg': '風向 (度)',
+                'tas_C': '地上気温 (°C)'
+            };
+            
+            // テーブル形式で表示
+            let html = '<div class="results-table"><table class="table table-striped table-hover table-sm"><thead class="table-dark"><tr>';
+            
+            // ヘッダー（日本語名を使用）
+            columns.forEach(col => {
+                const displayName = columnMapping[col] || col;
+                html += `<th>${displayName}</th>`;
+            });
+            html += '</tr></thead><tbody>';
+            
+            // データ行
+            data.data.forEach(row => {
+                html += '<tr>';
+                columns.forEach(col => {
+                    let value = row[col];
+                    
+                    // 値の表示形式を調整
+                    if (typeof value === 'number') {
+                        if (col.includes('time') || col === 'time') {
+                            // 時刻はそのまま表示
+                            value = value;
+                        } else if (col.includes('lat') || col.includes('lon')) {
+                            // 緯度経度は小数点4桁
+                            value = value.toFixed(4);
+                        } else if (col.includes('direction') || col.includes('deg')) {
+                            // 風向は整数
+                            value = Math.round(value);
+                        } else {
+                            // その他の数値は小数点2桁
+                            value = value.toFixed(2);
+                        }
+                    } else if (value && typeof value === 'string' && value.includes('T')) {
+                        // ISO時刻文字列をローカル時刻に変換
+                        try {
+                            const date = new Date(value);
+                            value = date.toLocaleString('ja-JP');
+                        } catch (e) {
+                            // 変換失敗時はそのまま表示
+                        }
+                    }
+                    
+                    html += `<td>${value || '-'}</td>`;
+                });
+                html += '</tr>';
+            });
+            html += '</tbody></table></div>';
+            
+            // データ件数も表示
+            html = `<div class="mb-3">
+                        <span class="badge bg-primary">${data.data.length}件のデータ</span>
+                        <span class="badge bg-info">${data.columns.length}列</span>
+                    </div>` + html;
+            
+            resultsDiv.innerHTML = html;
+            
+            // グラフ描画（JSON形式の場合のみ）
+            const outputFormat = document.getElementById('outputFormat').value;
+            if (outputFormat === 'json') {
+                drawCharts(data);
+            }
+        }
+        
+        // ステータス表示
+        function showStatus(type, message) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.style.display = 'block';
+            statusDiv.className = `extraction-status alert alert-${type === 'error' ? 'danger' : type === 'success' ? 'success' : 'info'}`;
+            statusDiv.innerHTML = message;
+            
+            // 3秒後に自動非表示（エラー以外）
+            if (type !== 'error') {
+                setTimeout(() => {
+                    statusDiv.style.display = 'none';
+                }, 3000);
+            }
+        }
+        
+        // ローディング表示制御
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            const btn = document.getElementById('extractBtn');
+            
+            if (show) {
+                loading.style.display = 'block';
+                btn.disabled = true;
+            } else {
+                loading.style.display = 'none';
+                btn.disabled = false;
+            }
+        }
+        
+        // グラフ描画機能
+        let currentCharts = []; // 現在のチャートインスタンスを保存
+        
+        function drawCharts(data) {
+            // 既存のチャートを破棄
+            currentCharts.forEach(chart => {
+                if (chart) chart.destroy();
+            });
+            currentCharts = [];
+            
+            const chartsContainer = document.getElementById('charts-container');
+            const chartsDiv = document.getElementById('charts');
+            
+            if (!data.data || data.data.length === 0) {
+                chartsContainer.style.display = 'none';
+                return;
+            }
+            
+            // 時系列データかどうかチェック
+            const hasTimeColumn = data.columns.includes('time');
+            if (!hasTimeColumn) {
+                chartsContainer.style.display = 'none';
+                return;
+            }
+            
+            // 数値データのカラムを抽出
+            const numericColumns = data.columns.filter(col => {
+                return col !== 'time' && col !== 'lat' && col !== 'lon' && 
+                       col !== 'method' && col !== 'level_hPa' && col !== 'n_points' &&
+                       data.data.some(row => typeof row[col] === 'number');
+            });
+            
+            if (numericColumns.length === 0) {
+                chartsContainer.style.display = 'none';
+                return;
+            }
+            
+            // 時刻データを準備
+            const timeLabels = data.data.map(row => {
+                const timeValue = row.time;
+                if (typeof timeValue === 'string' && timeValue.includes('T')) {
+                    try {
+                        const date = new Date(timeValue);
+                        return date.toLocaleString('ja-JP', {
+                            month: '2-digit',
+                            day: '2-digit',
+                            hour: '2-digit',
+                            minute: '2-digit'
+                        });
+                    } catch (e) {
+                        return timeValue;
+                    }
+                }
+                return timeValue;
+            });
+            
+            // カラム名を日本語に変換するマッピング
+            const columnMapping = {
+                'u_ms': 'U成分 (m/s)',
+                'v_ms': 'V成分 (m/s)',
+                'ta_C': '気温 (°C)',
+                'tas_C': '地上気温 (°C)',
+                'rh_%': '相対湿度 (%)',
+                'ps_hPa': '海面更正気圧 (hPa)',
+                'pres_hPa': '気圧 (hPa)',
+                'wind_speed_ms': '風速 (m/s)',
+                'wind_direction_deg': '風向 (度)'
+            };
+            
+            // 色のパレット
+            const colors = [
+                '#FF6384', '#36A2EB', '#FFCE56', '#4BC0C0',
+                '#9966FF', '#FF9F40', '#FF6384', '#C9CBCF'
+            ];
+            
+            chartsDiv.innerHTML = '';
+            
+            // 各数値カラムに対してグラフを作成
+            numericColumns.forEach((column, index) => {
+                const chartData = data.data.map(row => row[column]);
+                const displayName = columnMapping[column] || column;
+                
+                // チャートコンテナを作成
+                const chartWrapper = document.createElement('div');
+                chartWrapper.className = 'col-md-6 mb-4';
+                chartWrapper.innerHTML = `
+                    <div class="chart-container">
+                        <div class="chart-title">${displayName}</div>
+                        <canvas id="chart-${index}"></canvas>
+                    </div>
+                `;
+                chartsDiv.appendChild(chartWrapper);
+                
+                // Chart.jsでグラフを作成
+                const ctx = document.getElementById(`chart-${index}`).getContext('2d');
+                const chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: timeLabels,
+                        datasets: [{
+                            label: displayName,
+                            data: chartData,
+                            borderColor: colors[index % colors.length],
+                            backgroundColor: colors[index % colors.length] + '20',
+                            borderWidth: 2,
+                            fill: false,
+                            tension: 0.1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                display: false
+                            }
+                        },
+                        scales: {
+                            x: {
+                                title: {
+                                    display: true,
+                                    text: '時刻'
+                                }
+                            },
+                            y: {
+                                title: {
+                                    display: true,
+                                    text: displayName
+                                }
+                            }
+                        }
+                    }
+                });
+                
+                currentCharts.push(chart);
+            });
+            
+            chartsContainer.style.display = 'block';
+        }
+        
+        // 使用格子点を地図上に表示
+        function showUsedGridPoints(gridPoints) {
+            // 既存の使用格子点レイヤーを削除
+            if (usedGridPointsLayer) {
+                map.removeLayer(usedGridPointsLayer);
+            }
+            
+            if (!gridPoints || gridPoints.length === 0) {
+                return;
+            }
+            
+            // 新しい格子点表示システムに使用された格子点を更新
+            if (typeof window.updateUsedGridPoints === 'function') {
+                window.updateUsedGridPoints(gridPoints);
+                console.log('Updated used grid points via new system');
+            }
+            
+            usedGridPointsLayer = L.layerGroup();
+            
+            gridPoints.forEach((point, index) => {
+                // 使用格子点を特別な色で表示（従来のシステム）
+                const circle = L.circleMarker([point.lat, point.lon], {
+                    radius: 6,
+                    color: 'purple',
+                    fillColor: 'magenta',
+                    fillOpacity: 0.8,
+                    weight: 2
+                }).bindPopup(`
+                    <strong>使用格子点 #${index + 1}</strong><br>
+                    緯度: ${point.lat.toFixed(4)}°<br>
+                    経度: ${point.lon.toFixed(4)}°<br>
+                    距離: ${point.distance.toFixed(1)} km<br>
+                    グリッド: [${point.grid_i}, ${point.grid_j}]<br>
+                    抽出方法: ${point.method}
+                `);
+                
+                usedGridPointsLayer.addLayer(circle);
+            });
+            
+            usedGridPointsLayer.addTo(map);
+            
+            // 情報メッセージを表示
+            const infoDiv = document.getElementById('grid-info') || document.createElement('div');
+            infoDiv.id = 'grid-info';
+            infoDiv.className = 'alert alert-info mt-2';
+            infoDiv.innerHTML = `
+                <strong>データ抽出で使用された格子点:</strong> ${gridPoints.length}点<br>
+                <small>紫色の点がデータ抽出に使用された格子点です</small>
+            `;
+            
+            const coordinatesDiv = document.getElementById('coordinates');
+            if (coordinatesDiv.nextSibling && coordinatesDiv.nextSibling.id === 'grid-info') {
+                coordinatesDiv.parentNode.replaceChild(infoDiv, coordinatesDiv.nextSibling);
+            } else {
+                coordinatesDiv.parentNode.insertBefore(infoDiv, coordinatesDiv.nextSibling);
+            }
+        }
+        
+        // 初期化
+        document.addEventListener('DOMContentLoaded', function() {
+            initMap();
+            initLevels();
+            loadVariables();
+            setupEventListeners();
+            
+            // デフォルト時刻設定
+            const now = new Date();
+            const defaultTime = '2024-07-03T12:00';
+            document.getElementById('timeSingle').value = defaultTime;
+            document.getElementById('timeStart').value = '2024-07-03T09:00';
+            document.getElementById('timeEnd').value = '2024-07-03T15:00';
+        });
+    </script>
+    
+    <!-- 格子点表示機能 -->
+    <script src="{{ url_for('static', filename='grid_display.js') }}" defer></script>
+</body>
+</html>
