@@ -3,6 +3,21 @@
 Lambert Conformal Conic投影のNetCDFファイルから気象データを抽出するPython 3.11.5対応プログラムです。
 コマンドライン版とWebブラウザ版の両方を提供しています。
 
+## 💻 動作確認済み環境
+
+- **macOS** 14+ (M1/M2チップ対応) ✅
+- **Ubuntu** 20.04+ ✅  
+- **CentOS** 8+ ✅
+- **Windows** 10/11 ✨新サポート ✅
+
+Python 3.11以上が必要です。
+
+**動作確認コマンド：**
+```bash
+python3 check_platform.py  # macOS/Linux
+python check_platform.py   # Windows
+```
+
 ## 🌐 Webインターフェース版
 
 ### 特徴
@@ -13,10 +28,35 @@ Lambert Conformal Conic投影のNetCDFファイルから気象データを抽出
 
 ### 🚀 クイックスタート
 
+#### macOS/Linux
 1. **アプリケーションを起動**：
 ```bash
 cd /Users/ishizu/Desktop/Local_Analysis
 python3 app_optimized.py
+```
+
+#### Windows
+1. **アプリケーションを起動**：
+```cmd
+cd C:\path\to\Local_Analysis
+python app_optimized.py
+```
+
+#### 仮想環境使用（推奨）
+
+**macOS/Linux:**
+```bash
+./start_venv.sh
+```
+
+**Windows:**
+```cmd
+start_venv.bat
+```
+
+**PowerShell:**
+```powershell
+.\start_venv.ps1
 ```
 
 2. **ブラウザでアクセス**：

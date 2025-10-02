@@ -22,9 +22,40 @@ MSMの気象データ（Lambert Conformal Conic投影、633×521格子、5km解�
 ## 🌐 アクセス方法
 
 ### 1. アプリケーション起動
+
+#### macOS/Linux
 ```bash
 cd /Users/ishizu/Desktop/Local_Analysis
 python3 app_optimized.py
+```
+
+#### Windows (コマンドプロンプト)
+```cmd
+cd C:\path\to\Local_Analysis
+python app_optimized.py
+```
+
+#### Windows (PowerShell)
+```powershell
+cd C:\path\to\Local_Analysis
+python app_optimized.py
+```
+
+#### 仮想環境使用（推奨）
+
+**macOS/Linux:**
+```bash
+./start_venv.sh
+```
+
+**Windows (バッチファイル):**
+```cmd
+start_venv.bat
+```
+
+**Windows (PowerShell):**
+```powershell
+.\start_venv.ps1
 ```
 
 ### 2. ブラウザアクセス

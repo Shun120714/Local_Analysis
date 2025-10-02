@@ -228,6 +228,25 @@ function hideUsedGridPoints() {
     }
 }
 
+// 使用格子点を表示（HTMLから呼び出される）
+function showUsedGridPoints(usedPoints) {
+    console.log('showUsedGridPoints called with:', usedPoints);
+    
+    if (!usedPoints || usedPoints.length === 0) {
+        console.log('No used grid points to display');
+        return;
+    }
+    
+    // グローバル変数に保存
+    gridUsedPoints = usedPoints;
+    
+    // 表示実行
+    displayUsedGridPoints();
+}
+
+// エクスポート
+window.showUsedGridPoints = showUsedGridPoints;
+
 // 初期化
 document.addEventListener('DOMContentLoaded', function() {
     console.log('Grid display script loaded');

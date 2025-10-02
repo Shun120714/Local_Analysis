@@ -1,0 +1,734 @@
+/* JavaScript 関数 */
+
+// マップ初期化
+let map;
+let currentLayer = null;
+let extractedData = null;
+
+function initializeMap() {
+    // 日本周辺をデフォルト表示範囲に設定
+    map = L.map('map').setView([35.6762, 139.6503], 5);
+    
+    // OpenStreetMap タイルレイヤーを追加
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+    
+    // マップクリックイベント
+    map.on('click', function(e) {
+        if (document.getElement// 格子点表示のオン/オフ
+function onGridPointsDisplayChange() {
+    const showGrid = document.getElementById('showGridPoints').checked;
+    const densityOptions = document.getElementById('gridDensityOptions');
+    
+    if (showGrid) {
+        densityOptions.style.display = 'block';
+        if (!allGridPoints && !isLoadingAllGridPoints) {
+            loadAllGridPoints();
+        } else if (allGridPoints) {
+            displayAllGridPoints();
+        }
+    } else {
+        densityOptions.style.display = 'none';
+        hideAllGridPoints();
+    }
+}method').value === 'point') {
+            updatePointSelection(e.latlng.lat, e.latlng.lng);
+        }
+    });
+    
+    // エリア選択ツール
+    const drawnItems = new L.FeatureGroup();
+    map.addLayer(drawnItems);
+    
+    const drawControl = new L.Control.Draw({
+        edit: {
+            featureGroup: drawnItems
+        },
+        draw: {
+            polygon: true,
+            polyline: false,
+            rectangle: true,
+            circle: false,
+            marker: false,
+            circlemarker: false
+        }
+    });
+    
+    map.addControl(drawControl);
+    
+    // 描画イベント
+    map.on(L.Draw.Event.CREATED, function(e) {
+        const layer = e.layer;
+        drawnItems.addLayer(layer);
+        
+        if (layer instanceof L.Polygon || layer instanceof L.Rectangle) {
+            updateAreaSelection(layer);
+        }
+    });
+}
+
+// ポイント選択の更新
+function updatePointSelection(lat, lng) {
+    document.getElementById('lat_min').value = lat.toFixed(4);
+    document.getElementById('lon_min').value = lng.toFixed(4);
+    
+    // マーカーを追加（既存のものがあれば削除）
+    if (currentLayer) {
+        map.removeLayer(currentLayer);
+    }
+    
+    currentLayer = L.marker([lat, lng])
+        .addTo(map)
+        .bindPopup(`選択地点: ${lat.toFixed(4)}, ${lng.toFixed(4)}`)
+        .openPopup();
+}
+
+// エリア選択の更新
+function updateAreaSelection(layer) {
+    const bounds = layer.getBounds();
+    document.getElementById('lat_min').value = bounds.getSouth().toFixed(4);
+    document.getElementById('lat_max').value = bounds.getNorth().toFixed(4);
+    document.getElementById('lon_min').value = bounds.getWest().toFixed(4);
+    document.getElementById('lon_max').value = bounds.getEast().toFixed(4);
+    
+    currentLayer = layer;
+}
+
+// 空間選択方法の変更
+function onSpatialMethodChange() {
+    const method = document.getElementById('spatial_method').value;
+    const areaInputs = document.getElementById('area_inputs');
+    const pointInputs = document.getElementById('point_inputs');
+    
+    if (method === 'area') {
+        areaInputs.style.display = 'block';
+        pointInputs.style.display = 'none';
+    } else {
+        areaInputs.style.display = 'none';
+        pointInputs.style.display = 'block';
+    }
+    
+    // 既存の選択をクリア
+    if (currentLayer) {
+        map.removeLayer(currentLayer);
+        currentLayer = null;
+    }
+}
+
+// データタイプの変更
+function onDataTypeChange() {
+    const dataType = document.getElementById('data_type').value;
+    const levelSelect = document.getElementById('level_select');
+    
+    if (dataType === 'isobaric') {
+        levelSelect.style.display = 'block';
+        loadAvailableLevels();
+    } else {
+        levelSelect.style.display = 'none';
+    }
+    
+    loadVariableList();
+}
+
+// 利用可能なレベルの読み込み
+async function loadAvailableLevels() {
+    try {
+        const response = await fetch('/api/available_levels');
+        if (!response.ok) throw new Error('レベル情報の取得に失敗しました');
+        
+        const data = await response.json();
+        const levelCheckboxes = document.getElementById('level_checkboxes');
+        
+        levelCheckboxes.innerHTML = '';
+        data.levels.forEach(level => {
+            const div = document.createElement('div');
+            div.className = 'form-check';
+            div.innerHTML = `
+                <input class="form-check-input" type="checkbox" value="${level}" id="level_${level}">
+                <label class="form-check-label" for="level_${level}">
+                    ${level} hPa
+                </label>
+            `;
+            levelCheckboxes.appendChild(div);
+        });
+    } catch (error) {
+        showAlert('error', error.message);
+    }
+}
+
+// 変数リストの読み込み
+async function loadVariableList() {
+    const dataType = document.getElementById('data_type').value;
+    const variableCheckboxes = document.getElementById('variable_checkboxes');
+    
+    // variables.yml から変数リストを取得（簡易版）
+    const variables = {
+        'surface': [
+            'Temperature_height_above_ground',
+            'Relative_humidity_height_above_ground',
+            'u-component_of_wind_height_above_ground',
+            'v-component_of_wind_height_above_ground',
+            'Pressure_reduced_to_MSL_msl',
+            'Precipitation_rate_surface'
+        ],
+        'isobaric': [
+            'Temperature_isobaric',
+            'Relative_humidity_isobaric',
+            'u-component_of_wind_isobaric',
+            'v-component_of_wind_isobaric',
+            'Geopotential_Height_isobaric'
+        ]
+    };
+    
+    const varList = variables[dataType] || [];
+    variableCheckboxes.innerHTML = '';
+    
+    varList.forEach(variable => {
+        const div = document.createElement('div');
+        div.className = 'form-check';
+        div.innerHTML = `
+            <input class="form-check-input" type="checkbox" value="${variable}" id="var_${variable}">
+            <label class="form-check-label" for="var_${variable}">
+                ${variable.replace(/_/g, ' ')}
+            </label>
+        `;
+        variableCheckboxes.appendChild(div);
+    });
+}
+
+// グリッド情報の読み込み
+async function loadGridInfo() {
+    try {
+        const response = await fetch('/api/grid_info');
+        if (!response.ok) throw new Error('グリッド情報の取得に失敗しました');
+        
+        const data = await response.json();
+        const gridInfo = document.getElementById('grid_info');
+        
+        gridInfo.innerHTML = `
+            <strong>グリッド情報:</strong><br>
+            形状: ${data.shape[0]} × ${data.shape[1]}<br>
+            緯度範囲: ${data.lat_range[0].toFixed(2)}° - ${data.lat_range[1].toFixed(2)}°<br>
+            経度範囲: ${data.lon_range[0].toFixed(2)}° - ${data.lon_range[1].toFixed(2)}°<br>
+            投影法: ${data.projection}
+        `;
+    } catch (error) {
+        console.warn('グリッド情報の取得に失敗:', error);
+    }
+}
+
+// データ抽出の実行
+async function extractData() {
+    const btn = document.getElementById('extract_btn');
+    const spinner = document.getElementById('loading_spinner');
+    const resultsDiv = document.getElementById('results');
+    
+    // バリデーション
+    if (!validateForm()) {
+        return;
+    }
+    
+    // UI状態を更新
+    btn.disabled = true;
+    spinner.style.display = 'inline-block';
+    resultsDiv.innerHTML = '';
+    
+    try {
+        // フォームデータの取得
+        const formData = getFormData();
+        
+        // API呼び出し
+        const response = await fetch('/api/extract', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(formData)
+        });
+        
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || 'データ抽出に失敗しました');
+        }
+        
+        const result = await response.json();
+        extractedData = result;
+        
+        // 結果の表示
+        displayResults(result);
+        showAlert('success', 'データ抽出が完了しました');
+        
+    } catch (error) {
+        showAlert('error', error.message);
+    } finally {
+        btn.disabled = false;
+        spinner.style.display = 'none';
+    }
+}
+
+// フォームデータの取得
+function getFormData() {
+    const spatialMethod = document.getElementById('spatial_method').value;
+    const dataType = document.getElementById('data_type').value;
+    
+    const formData = {
+        spatial_method: spatialMethod,
+        data_type: dataType,
+        start_time: document.getElementById('start_time').value,
+        end_time: document.getElementById('end_time').value,
+        output_format: document.getElementById('output_format').value,
+        output_filename: document.getElementById('output_filename').value
+    };
+    
+    // 空間選択パラメータ
+    if (spatialMethod === 'point') {
+        formData.lat = parseFloat(document.getElementById('lat_min').value);
+        formData.lon = parseFloat(document.getElementById('lon_min').value);
+    } else {
+        formData.lat_min = parseFloat(document.getElementById('lat_min').value);
+        formData.lat_max = parseFloat(document.getElementById('lat_max').value);
+        formData.lon_min = parseFloat(document.getElementById('lon_min').value);
+        formData.lon_max = parseFloat(document.getElementById('lon_max').value);
+    }
+    
+    // 変数選択
+    const selectedVariables = Array.from(document.querySelectorAll('#variable_checkboxes input:checked'))
+        .map(cb => cb.value);
+    formData.variables = selectedVariables;
+    
+    // レベル選択（等圧面データの場合）
+    if (dataType === 'isobaric') {
+        const selectedLevels = Array.from(document.querySelectorAll('#level_checkboxes input:checked'))
+            .map(cb => parseInt(cb.value));
+        formData.levels = selectedLevels;
+    }
+    
+    return formData;
+}
+
+// フォームバリデーション
+function validateForm() {
+    const spatialMethod = document.getElementById('spatial_method').value;
+    const selectedVariables = document.querySelectorAll('#variable_checkboxes input:checked');
+    
+    // 変数が選択されているかチェック
+    if (selectedVariables.length === 0) {
+        showAlert('warning', '少なくとも1つの変数を選択してください');
+        return false;
+    }
+    
+    // 空間範囲のチェック
+    const latMin = parseFloat(document.getElementById('lat_min').value);
+    const lonMin = parseFloat(document.getElementById('lon_min').value);
+    
+    if (isNaN(latMin) || isNaN(lonMin)) {
+        showAlert('warning', '緯度・経度を正しく入力してください');
+        return false;
+    }
+    
+    if (spatialMethod === 'area') {
+        const latMax = parseFloat(document.getElementById('lat_max').value);
+        const lonMax = parseFloat(document.getElementById('lon_max').value);
+        
+        if (isNaN(latMax) || isNaN(lonMax)) {
+            showAlert('warning', '緯度・経度の範囲を正しく入力してください');
+            return false;
+        }
+        
+        if (latMin >= latMax || lonMin >= lonMax) {
+            showAlert('warning', '緯度・経度の範囲が正しくありません');
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+// 結果の表示
+function displayResults(result) {
+    const resultsDiv = document.getElementById('results');
+    
+    let html = `
+        <div class="card card-custom">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="fas fa-check-circle text-success status-icon"></i>
+                    抽出結果
+                </h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong>ファイル:</strong> ${result.output_file}<br>
+                        <strong>データ形状:</strong> ${result.data_shape}<br>
+                        <strong>抽出時間:</strong> ${result.processing_time.toFixed(2)}秒
+                    </div>
+                    <div class="col-md-6">
+                        <strong>変数数:</strong> ${result.variables.length}<br>
+                        <strong>時間ステップ:</strong> ${result.time_steps}<br>
+                        <strong>ファイルサイズ:</strong> ${result.file_size}
+                    </div>
+                </div>
+    `;
+    
+    if (result.sample_data && result.sample_data.length > 0) {
+        html += `
+                <div class="mt-3">
+                    <h6>サンプルデータ（最初の5行）:</h6>
+                    <div class="table-responsive" style="max-height: 300px;">
+                        <table class="table table-sm table-striped data-table">
+                            <thead class="table-dark">
+                                <tr>
+        `;
+        
+        // テーブルヘッダー
+        Object.keys(result.sample_data[0]).forEach(key => {
+            html += `<th>${key}</th>`;
+        });
+        html += '</tr></thead><tbody>';
+        
+        // テーブルデータ
+        result.sample_data.slice(0, 5).forEach(row => {
+            html += '<tr>';
+            Object.values(row).forEach(value => {
+                const displayValue = typeof value === 'number' ? value.toFixed(3) : value;
+                html += `<td>${displayValue}</td>`;
+            });
+            html += '</tr>';
+        });
+        
+        html += '</tbody></table></div>';
+    }
+    
+    html += `
+                <div class="mt-3">
+                    <button class="btn btn-primary" onclick="downloadFile()">
+                        <i class="fas fa-download"></i> ファイルをダウンロード
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    resultsDiv.innerHTML = html;
+}
+
+// ファイルダウンロード
+function downloadFile() {
+    if (extractedData && extractedData.output_file) {
+        const link = document.createElement('a');
+        link.href = `/download/${extractedData.output_file}`;
+        link.download = extractedData.output_file;
+        link.click();
+    }
+}
+
+// アラート表示
+function showAlert(type, message) {
+    const alertsDiv = document.getElementById('alerts');
+    const alertClass = {
+        'success': 'alert-success',
+        'error': 'alert-danger',
+        'warning': 'alert-warning',
+        'info': 'alert-info'
+    }[type] || 'alert-info';
+    
+    const iconClass = {
+        'success': 'fa-check-circle',
+        'error': 'fa-exclamation-circle',
+        'warning': 'fa-exclamation-triangle',
+        'info': 'fa-info-circle'
+    }[type] || 'fa-info-circle';
+    
+    const alert = document.createElement('div');
+    alert.className = `alert ${alertClass} alert-dismissible fade show`;
+    alert.innerHTML = `
+        <i class="fas ${iconClass} status-icon"></i>
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    alertsDiv.appendChild(alert);
+    
+    // 5秒後に自動削除
+    setTimeout(() => {
+        if (alert.parentNode) {
+            alert.remove();
+        }
+    }, 5000);
+}
+
+// ページ読み込み時の初期化
+document.addEventListener('DOMContentLoaded', function() {
+    initializeMap();
+    loadGridInfo();
+    loadVariableList();
+    
+    // イベントリスナーの設定
+    document.getElementById('spatial_method').addEventListener('change', onSpatialMethodChange);
+    document.getElementById('data_type').addEventListener('change', onDataTypeChange);
+    document.getElementById('extract_btn').addEventListener('click', extractData);
+    
+    // 格子点表示のイベントリスナー
+    document.getElementById('showGridPoints').addEventListener('change', onGridPointsDisplayChange);
+    document.getElementById('showNearbyGridPoints').addEventListener('change', onNearbyGridPointsChange);
+    
+    // 初期状態の設定
+    onSpatialMethodChange();
+    onDataTypeChange();
+});
+
+// 格子点表示関連の変数
+let allGridPoints = null;
+let gridPointsLayer = null;
+let nearbyGridPointsLayer = null;
+let isLoadingAllGridPoints = false;
+
+// 全格子点表示のオン/オフ
+function onGridPointsDisplayChange() {
+    const showGrid = document.getElementById('showGridPoints').checked;
+    
+    if (showGrid) {
+        if (!allGridPoints && !isLoadingAllGridPoints) {
+            loadAllGridPoints();
+        } else if (allGridPoints) {
+            displayAllGridPoints();
+        }
+    } else {
+        hideAllGridPoints();
+    }
+}
+
+// 付近格子点表示のオン/オフ
+function onNearbyGridPointsChange() {
+    const showNearby = document.getElementById('showNearbyGridPoints').checked;
+    const optionsDiv = document.getElementById('nearbyGridOptions');
+    
+    if (showNearby) {
+        optionsDiv.style.display = 'block';
+        // 現在選択されている地点があれば付近格子点を表示
+        const coordinates = document.getElementById('coordinates').textContent;
+        if (coordinates !== '地図をクリックして地点を選択してください') {
+            loadNearbyGridPoints();
+        }
+    } else {
+        optionsDiv.style.display = 'none';
+        hideNearbyGridPoints();
+    }
+}
+
+// 全格子点を読み込み
+async function loadAllGridPoints() {
+    if (isLoadingAllGridPoints) return;
+    
+    isLoadingAllGridPoints = true;
+    
+    try {
+        showAlert('info', '全格子点を読み込み中...');
+        
+        // 座標のみの軽量形式で取得
+        const response = await fetch('/api/all_grid_points?format=coordinates&coords=true');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            allGridPoints = data;
+            showAlert('success', `格子点読み込み完了: ${data.count}点 (${data.grid_info.dimensions.x}×${data.grid_info.dimensions.y})`);
+            displayAllGridPoints();
+        } else {
+            showAlert('error', `格子点読み込みエラー: ${data.message}`);
+        }
+    } catch (error) {
+        showAlert('error', `格子点読み込みエラー: ${error.message}`);
+        console.error('Grid points load error:', error);
+    } finally {
+        isLoadingAllGridPoints = false;
+    }
+}
+
+// 全格子点を地図に表示
+function displayAllGridPoints() {
+    if (!allGridPoints || !map) return;
+    
+    hideAllGridPoints(); // 既存のレイヤーを削除
+    
+    const points = allGridPoints.points;
+    const markers = [];
+    
+    // パフォーマンスのため、ズームレベルに応じて間引きを行う
+    const currentZoom = map.getZoom();
+    let step = 1;
+    
+    // 5km格子に適した間引き設定に調整
+    if (currentZoom < 7) step = 8;         // 低ズーム: 約40km間隔
+    else if (currentZoom < 9) step = 4;    // 中ズーム: 約20km間隔  
+    else if (currentZoom < 11) step = 2;   // 高ズーム: 約10km間隔
+    else step = 1;                         // 最高ズーム: 5km間隔（全表示）
+    
+    for (let i = 0; i < points.length; i += step) {
+        const point = points[i];
+        
+        // ズームレベルに応じてマーカーサイズを調整
+        let radius = 2;
+        if (currentZoom >= 11) radius = 3;
+        else if (currentZoom >= 9) radius = 2.5;
+        
+        const marker = L.circleMarker([point.lat, point.lon], {
+            radius: radius,
+            fillColor: '#3388ff',
+            color: '#ffffff',
+            weight: 1,
+            opacity: 0.8,
+            fillOpacity: 0.6
+        });
+        
+        marker.bindPopup(`
+            格子点 [${point.i}, ${point.j}]<br>
+            緯度: ${point.lat.toFixed(4)}°<br>
+            経度: ${point.lon.toFixed(4)}°<br>
+            格子間隔: 約5km
+        `);
+        
+        markers.push(marker);
+    }
+    
+    gridPointsLayer = L.layerGroup(markers).addTo(map);
+    
+    // 格子点密度情報を表示
+    const displayedPoints = Math.ceil(points.length / step);
+    const gridSpacing = step * 5; // km
+    console.log(`格子点表示: ${displayedPoints}点, 表示間隔: 約${gridSpacing}km`);
+    
+    // ズーム変更時に再描画
+    map.off('zoomend.gridpoints');
+    map.on('zoomend.gridpoints', () => {
+        if (document.getElementById('showGridPoints').checked) {
+            displayAllGridPoints();
+        }
+    });
+}
+
+// 全格子点表示を非表示
+function hideAllGridPoints() {
+    if (gridPointsLayer) {
+        map.removeLayer(gridPointsLayer);
+        gridPointsLayer = null;
+    }
+    map.off('zoomend.gridpoints');
+}
+
+// 付近格子点を読み込み
+async function loadNearbyGridPoints() {
+    const coordinatesText = document.getElementById('coordinates').textContent;
+    if (coordinatesText === '地図をクリックして地点を選択してください') {
+        return;
+    }
+    
+    // 座標を解析
+    const match = coordinatesText.match(/緯度:\s*([\d.-]+).*経度:\s*([\d.-]+)/);
+    if (!match) return;
+    
+    const lat = parseFloat(match[1]);
+    const lon = parseFloat(match[2]);
+    const radius = document.getElementById('nearbyRadius').value;
+    const maxPoints = document.getElementById('nearbyMaxPoints').value;
+    
+    try {
+        const response = await fetch(`/api/nearby_grid_points?lat=${lat}&lon=${lon}&radius=${radius}&max_points=${maxPoints}`);
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            displayNearbyGridPoints(data.points, lat, lon);
+        } else {
+            showAlert('error', `付近格子点取得エラー: ${data.message}`);
+        }
+    } catch (error) {
+        showAlert('error', `付近格子点取得エラー: ${error.message}`);
+        console.error('Nearby grid points error:', error);
+    }
+}
+
+// 付近格子点を地図に表示
+function displayNearbyGridPoints(points, centerLat, centerLon) {
+    hideNearbyGridPoints(); // 既存のレイヤーを削除
+    
+    const markers = [];
+    
+    // 中心点マーカー
+    const centerMarker = L.marker([centerLat, centerLon], {
+        icon: L.divIcon({
+            className: 'center-point-marker',
+            html: '<div style="background: red; width: 10px; height: 10px; border-radius: 50%; border: 2px solid white;"></div>',
+            iconSize: [14, 14],
+            iconAnchor: [7, 7]
+        })
+    });
+    centerMarker.bindPopup(`選択地点<br>緯度: ${centerLat.toFixed(4)}°<br>経度: ${centerLon.toFixed(4)}°`);
+    markers.push(centerMarker);
+    
+    // 付近格子点マーカー
+    points.forEach((point, index) => {
+        const marker = L.circleMarker([point.lat, point.lon], {
+            radius: 4,
+            fillColor: '#ff7800',
+            color: '#ffffff',
+            weight: 1,
+            opacity: 0.9,
+            fillOpacity: 0.7
+        });
+        
+        marker.bindPopup(`
+            格子点 [${point.grid_i}, ${point.grid_j}]<br>
+            緯度: ${point.lat.toFixed(4)}°<br>
+            経度: ${point.lon.toFixed(4)}°<br>
+            距離: ${point.distance ? point.distance.toFixed(2) + 'km' : '未計算'}
+        `);
+        
+        markers.push(marker);
+    });
+    
+    nearbyGridPointsLayer = L.layerGroup(markers).addTo(map);
+}
+
+// 付近格子点表示を非表示
+function hideNearbyGridPoints() {
+    if (nearbyGridPointsLayer) {
+        map.removeLayer(nearbyGridPointsLayer);
+        nearbyGridPointsLayer = null;
+    }
+}
+
+// 格子境界情報を取得・表示
+async function loadGridBounds() {
+    try {
+        const response = await fetch('/api/grid_bounds');
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            // 格子境界を地図に表示
+            const bounds = [
+                [data.corners.top_left.lat, data.corners.top_left.lon],
+                [data.corners.top_right.lat, data.corners.top_right.lon],
+                [data.corners.bottom_right.lat, data.corners.bottom_right.lon],
+                [data.corners.bottom_left.lat, data.corners.bottom_left.lon]
+            ];
+            
+            const polygon = L.polygon(bounds, {
+                color: '#ff0000',
+                weight: 2,
+                opacity: 0.8,
+                fillOpacity: 0.1
+            }).addTo(map);
+            
+            polygon.bindPopup(`
+                格子範囲<br>
+                ${data.grid_info.system}<br>
+                解像度: ${data.grid_info.resolution}<br>
+                格子数: ${data.grid_info.dimensions}
+            `);
+            
+            return data;
+        }
+    } catch (error) {
+        console.error('Grid bounds error:', error);
+    }
+    return null;
+}

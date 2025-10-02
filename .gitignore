@@ -142,10 +142,6 @@ Temporary Items
 app.log*  # ログファイル
 *.csv  # 出力CSVファイル
 *.parquet  # 出力Parquetファイル
-use_nc/  # NetCDFデータディレクトリ (大容量のため)
 
 # 元の全パッケージ要件ファイル
 requirements.txt
-
-# 重複ディレクトリ
-Local_Analysis/

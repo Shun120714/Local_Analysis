@@ -860,8 +860,12 @@
             }
             
             // 使用格子点を地図上に表示
+            console.log('Checking for used grid points:', data.metadata);
             if (data.metadata && data.metadata.used_grid_points) {
+                console.log('Found used grid points:', data.metadata.used_grid_points);
                 showUsedGridPoints(data.metadata.used_grid_points);
+            } else {
+                console.log('No used grid points found in metadata');
             }
             
             // カラム名を取得（サーバーから提供される場合はそれを使用、ない場合はデータから推定）
