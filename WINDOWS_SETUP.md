@@ -38,27 +38,39 @@ use_nc/
 
 ### 3. 自動セットアップ（推奨）
 
-#### 方法A: バッチファイル使用
+**重要**: PowerShellとコマンドプロンプトでは実行方法が異なります。
+
+#### 方法A: コマンドプロンプト使用（推奨）
+1. `Win + R` → `cmd` → Enterでコマンドプロンプトを開く
+2. プロジェクトフォルダに移動
+3. バッチファイルを実行
 ```cmd
-# コマンドプロンプトで実行
+cd "C:\Users\odalab-\Desktop\Local_Analysis-main"
 setup_venv.bat
 ```
 
 #### 方法B: PowerShell使用
 ```powershell
-# PowerShellで実行
+# PowerShellで正しい実行方法
+.\setup_venv.bat
+
+# またはPowerShell専用スクリプト
 .\setup_venv.ps1
 ```
 
 ### 4. アプリケーション起動
 
-#### 方法A: バッチファイル使用
+#### 方法A: コマンドプロンプト使用（推奨）
 ```cmd
 start_venv.bat
 ```
 
 #### 方法B: PowerShell使用
 ```powershell
+# PowerShellで正しい実行方法
+.\start_venv.bat
+
+# またはPowerShell専用スクリプト
 .\start_venv.ps1
 ```
 
@@ -106,8 +118,37 @@ http://localhost:8000
 
 ## ⚠️ トラブルシューティング
 
-### PowerShell実行ポリシーエラー
+### PowerShellでバッチファイル実行エラー
+**エラー例**: `setup_venv.bat : 用語 'setup_venv.bat' は、コマンドレット、関数、スクリプト ファイル、または操作可能なプログラムの名前として認識されません。`
+
+**解決方法**:
+
+#### 方法1: PowerShellで正しい実行方法を使用
+```powershell
+# カレントディレクトリのバッチファイルを実行
+.\setup_venv.bat
+
+# または、cmdコマンドを経由して実行
+cmd /c setup_venv.bat
 ```
+
+#### 方法2: PowerShellスクリプトを使用（推奨）
+```powershell
+# PowerShell専用スクリプトを実行
+.\setup_venv.ps1
+```
+
+#### 方法3: コマンドプロンプトを使用
+1. `Win + R` キーを押して「実行」ダイアログを開く
+2. `cmd` と入力してEnterキーを押す
+3. コマンドプロンプトで以下を実行：
+```cmd
+cd "C:\Users\odalab-\Desktop\Local_Analysis-main"
+setup_venv.bat
+```
+
+### PowerShell実行ポリシーエラー
+```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 ```
 
